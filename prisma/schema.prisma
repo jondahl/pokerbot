@@ -1,0 +1,151 @@
+// Prisma schema for PokerList app
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+}
+
+// Players table - poker players who can be invited to games
+model Player {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  firstName       String    @map("first_name")
+  lastName        String    @map("last_name")
+  email           String
+  phone           String    @unique // E.164 format: +14155551234
+
+  // Stats for priority algorithm (updated after each game)
+  lastInvitedAt   DateTime? @map("last_invited_at") @db.Timestamptz
+  responseCount   Int       @default(0) @map("response_count")
+  timeoutCount    Int       @default(0) @map("timeout_count")
+
+  optedOut        Boolean   @default(false) @map("opted_out")
+
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  invitations     Invitation[]
+  messages        Message[]
+
+  @@index([phone])
+  @@index([optedOut])
+  @@map("players")
+}
+
+// Games table - poker game events
+model Game {
+  id                  String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  date                DateTime   @db.Date
+  time                DateTime   @db.Time
+  timeBlock           String     @map("time_block")
+  location            String
+  entryInstructions   String?    @map("entry_instructions")
+  capacity            Int        @default(10)
+  rsvpDeadline        DateTime   @map("rsvp_deadline") @db.Timestamptz
+  status              GameStatus @default(draft)
+
+  createdAt           DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  invitations         Invitation[]
+  messages            Message[]
+
+  @@index([status])
+  @@index([date])
+  @@map("games")
+}
+
+enum GameStatus {
+  draft
+  active
+  completed
+  cancelled
+}
+
+// Invitations table - links players to games
+model Invitation {
+  id                      String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  gameId                  String           @map("game_id") @db.Uuid
+  playerId                String           @map("player_id") @db.Uuid
+  position                Int
+  status                  InvitationStatus @default(pending)
+  invitedAt               DateTime?        @map("invited_at") @db.Timestamptz
+  respondedAt             DateTime?        @map("responded_at") @db.Timestamptz
+  googleCalendarEventId   String?          @map("google_calendar_event_id")
+  calendarStatus          CalendarStatus?  @map("calendar_status")
+  morningCheckSentAt      DateTime?        @map("morning_check_sent_at") @db.Timestamptz
+  morningCheckResponse    String?          @map("morning_check_response")
+
+  createdAt               DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt               DateTime         @updatedAt @map("updated_at") @db.Timestamptz
+
+  game                    Game             @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  player                  Player           @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([gameId, playerId])
+  @@unique([gameId, position])
+  @@index([gameId])
+  @@index([playerId])
+  @@index([status])
+  @@map("invitations")
+}
+
+enum InvitationStatus {
+  pending
+  invited
+  confirmed
+  declined
+  timeout
+}
+
+enum CalendarStatus {
+  pending
+  accepted
+  declined
+}
+
+// Messages table - SMS conversation log
+model Message {
+  id                   String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  playerId             String            @map("player_id") @db.Uuid
+  gameId               String?           @map("game_id") @db.Uuid
+  direction            MessageDirection
+  body                 String
+  handlingType         HandlingType?     @map("handling_type")
+  llmConfidence        Decimal?          @map("llm_confidence") @db.Decimal(3, 2)
+  escalationStatus     EscalationStatus? @map("escalation_status")
+  escalationReason     String?           @map("escalation_reason")
+  llmSuggestedResponse String?           @map("llm_suggested_response")
+  twilioSid            String?           @map("twilio_sid")
+  sentAt               DateTime          @map("sent_at") @db.Timestamptz
+  createdAt            DateTime          @default(now()) @map("created_at") @db.Timestamptz
+
+  player               Player            @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  game                 Game?             @relation(fields: [gameId], references: [id], onDelete: SetNull)
+
+  @@index([playerId])
+  @@index([gameId])
+  @@index([sentAt])
+  @@map("messages")
+}
+
+enum MessageDirection {
+  inbound
+  outbound
+}
+
+enum HandlingType {
+  auto
+  escalated
+  admin
+}
+
+enum EscalationStatus {
+  pending
+  resolved
+}

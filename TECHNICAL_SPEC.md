@@ -115,6 +115,8 @@ CREATE TABLE messages (
   handling_type   TEXT,                    -- 'auto' | 'escalated' | 'admin'
   llm_confidence  DECIMAL(3,2),            -- 0.00 to 1.00, for inbound only
   escalation_status TEXT,                  -- 'pending' | 'resolved' | null
+  escalation_reason TEXT,                  -- Why LLM escalated (e.g., "guest request")
+  llm_suggested_response TEXT,             -- LLM's draft response (for admin to approve/edit)
 
   -- Twilio
   twilio_sid      TEXT,
@@ -209,6 +211,8 @@ erDiagram
         text handling_type
         decimal llm_confidence
         text escalation_status
+        text escalation_reason
+        text llm_suggested_response
         text twilio_sid
     }
 
@@ -325,9 +329,11 @@ flowchart TD
 
 ---
 
-## Admin UX Flows
+## UX Flows
 
-### Flow 1: Create a Game
+### Admin Flows
+
+#### Flow A1: Create a Game
 
 ```mermaid
 sequenceDiagram
@@ -357,14 +363,13 @@ sequenceDiagram
     UI-->>Admin: "Invites sent to N players"
 ```
 
-### Flow 2: Handle Escalation
+#### Flow A2: Handle Escalation
 
 ```mermaid
 sequenceDiagram
     actor Admin
     participant UI as Web UI
     participant DB as Database
-    participant LLM as Claude
     participant SMS as Twilio
 
     Note over Admin: Receives notification<br/>(email + SMS)
@@ -386,14 +391,416 @@ sequenceDiagram
     end
 
     SMS-->>UI: Sent
-    UI->>DB: Log message
-    UI->>DB: Save to learned_responses
+    UI->>DB: Log message (escalation_status: resolved)
     UI-->>Admin: "Response sent"
+```
+
+#### Flow A3: Monitor Active Game
+
+```mermaid
+sequenceDiagram
+    actor Admin
+    participant UI as Web UI
+    participant DB as Database
+
+    Admin->>UI: Open Active Game View
+    UI->>DB: Fetch game + all invitations
+    DB-->>UI: Game details + invitation statuses
+
+    UI-->>Admin: Show 3-column view
+    Note over UI: Confirmed | Pending | Queue
+
+    loop Auto-refresh every 30s
+        UI->>DB: Poll for updates
+        DB-->>UI: Updated statuses
+        UI-->>Admin: Update view
+    end
+
+    opt Manual intervention
+        Admin->>UI: Click "Invite Next" or "Mark Declined"
+        UI->>DB: Update invitation
+        UI->>SMS: Send invite (if applicable)
+    end
+```
+
+#### Flow A4: Add New Player
+
+```mermaid
+sequenceDiagram
+    actor Admin
+    participant UI as Web UI
+    participant DB as Database
+    participant SMS as Twilio
+
+    Admin->>UI: Click "Add Player"
+    UI-->>Admin: Show form
+
+    Admin->>UI: Enter first name, last name, email, phone
+    Admin->>UI: Click "Save"
+
+    UI->>DB: Create player
+    DB-->>UI: Player created
+
+    UI->>SMS: Send welcome message
+    SMS-->>UI: Delivered
+
+    UI-->>Admin: "Player added"
+```
+
+#### Flow A5: Cancel Game
+
+```mermaid
+sequenceDiagram
+    actor Admin
+    participant UI as Web UI
+    participant DB as Database
+    participant SMS as Twilio
+    participant Cal as Google Calendar
+
+    Admin->>UI: Click "Cancel Game"
+    UI-->>Admin: Show cancel modal with message textarea
+
+    Admin->>UI: Write cancellation message
+    Admin->>UI: Click "Cancel Game"
+
+    UI->>DB: Update game status → cancelled
+
+    par Send SMS to all invited/confirmed
+        loop Each player
+            UI->>SMS: Send cancellation message
+        end
+    and Cancel calendar events
+        loop Each confirmed player
+            UI->>Cal: Delete calendar event
+        end
+    end
+
+    UI-->>Admin: "Game cancelled, N players notified"
+```
+
+#### Flow A6: Send Custom Message
+
+```mermaid
+sequenceDiagram
+    actor Admin
+    participant UI as Web UI
+    participant DB as Database
+    participant SMS as Twilio
+
+    Admin->>UI: Open player conversation
+    Admin->>UI: Type message
+    Admin->>UI: Click "Send"
+
+    UI->>SMS: Send message
+    SMS-->>UI: Delivered
+    UI->>DB: Log message (handling_type: admin)
+
+    UI-->>Admin: Message appears in thread
 ```
 
 ---
 
-## Player SMS Journey
+### Player SMS Flows
+
+#### Flow P1: New Player - First Contact
+
+```mermaid
+sequenceDiagram
+    participant System
+    participant SMS as Twilio
+    actor Player
+
+    Note over System: Admin adds player
+
+    System->>SMS: Send welcome message
+    SMS->>Player: "You're on the list for Jon and Matt's<br/>poker game! Our pokerbot will notify you<br/>here when a game opens up.<br/>Unsubscribe at any time by saying STOP."
+
+    Note over Player: No response needed
+```
+
+#### Flow P2: Player Receives Invite
+
+```mermaid
+sequenceDiagram
+    participant System
+    participant SMS as Twilio
+    actor Player
+
+    Note over System: Game created,<br/>player in top N
+
+    System->>SMS: Send invite
+    SMS->>Player: "Poker game next Tuesday (March 11),<br/>7pm, at the Mux office. Want a spot?"
+
+    Note over Player: Player decides
+```
+
+#### Flow P3: Player Says YES
+
+```mermaid
+sequenceDiagram
+    actor Player
+    participant SMS as Twilio
+    participant LLM as Claude
+    participant System
+    participant Cal as Google Calendar
+
+    Player->>SMS: "yes"
+    SMS->>System: Webhook: inbound SMS
+
+    System->>LLM: Process message + context
+    LLM-->>System: {action: auto_respond, side_effects: [confirm, calendar]}
+
+    System->>SMS: Send confirmation
+    SMS->>Player: "Great, you're in. See you March 11.<br/>Arrive 6:30-7; cards at 7.<br/><br/>Entry instructions: Buzz 42...<br/><br/>(Reply with any questions...)"
+
+    System->>Cal: Create event, invite player
+    Cal->>Player: Calendar invite email
+
+    System->>System: Update invitation → confirmed
+    System->>System: Update player response_count++
+```
+
+#### Flow P4: Player Says NO
+
+```mermaid
+sequenceDiagram
+    actor Player
+    participant SMS as Twilio
+    participant LLM as Claude
+    participant System
+
+    Player->>SMS: "can't make it"
+    SMS->>System: Webhook: inbound SMS
+
+    System->>LLM: Process message + context
+    LLM-->>System: {action: auto_respond, side_effects: [decline, invite_next]}
+
+    System->>SMS: Send acknowledgment
+    SMS->>Player: "Thanks. Another time!"
+
+    System->>System: Update invitation → declined
+    System->>System: Update player response_count++
+    System->>System: Invite next player in queue
+```
+
+#### Flow P5: Player Asks Question (Auto-Handled)
+
+```mermaid
+sequenceDiagram
+    actor Player
+    participant SMS as Twilio
+    participant LLM as Claude
+    participant System
+
+    Player->>SMS: "what time again?"
+    SMS->>System: Webhook: inbound SMS
+
+    System->>LLM: Process message + context
+    LLM-->>System: {action: auto_respond, response: "7pm"}
+
+    System->>SMS: Send response
+    SMS->>Player: "7pm"
+```
+
+#### Flow P6: Player Asks Question (Escalated)
+
+```mermaid
+sequenceDiagram
+    actor Player
+    participant SMS as Twilio
+    participant LLM as Claude
+    participant System
+    actor Admin
+
+    Player->>SMS: "can I bring my buddy?"
+    SMS->>System: Webhook: inbound SMS
+
+    System->>LLM: Process message + context
+    LLM-->>System: {action: escalate, reason: "guest request"}
+
+    System->>System: Save message (escalation_status: pending)
+    System->>Admin: Notify via email + SMS
+
+    Note over Admin: Reviews in Escalation Queue
+
+    Admin->>System: "Sorry, we're at capacity this time"
+    System->>SMS: Send response
+    SMS->>Player: "Sorry, we're at capacity this time"
+
+    System->>System: Update escalation_status → resolved
+```
+
+#### Flow P7: Morning Check - Player Confirms
+
+```mermaid
+sequenceDiagram
+    participant Cron as 8:15am Cron
+    participant System
+    participant SMS as Twilio
+    actor Player
+
+    Cron->>System: Trigger morning check
+
+    System->>SMS: Send check-in
+    SMS->>Player: "Still in for poker tonight?<br/>Confirming headcount."
+
+    Player->>SMS: "yes"
+    SMS->>System: Webhook
+
+    System->>SMS: Acknowledge
+    SMS->>Player: "👍"
+
+    System->>System: Update morning_check_response: confirmed
+```
+
+#### Flow P8: Morning Check - Player Drops
+
+```mermaid
+sequenceDiagram
+    participant Cron as 8:15am Cron
+    participant System
+    participant SMS as Twilio
+    participant Cal as Google Calendar
+    actor Player
+
+    Cron->>System: Trigger morning check
+
+    System->>SMS: Send check-in
+    SMS->>Player: "Still in for poker tonight?"
+
+    Player->>SMS: "something came up, can't make it"
+    SMS->>System: Webhook
+
+    System->>SMS: Acknowledge
+    SMS->>Player: "Thanks for letting us know. Another time!"
+
+    System->>System: Update invitation → declined
+    System->>Cal: Cancel calendar event
+
+    alt More than 4 hours until game
+        System->>System: Invite next player in queue
+    else Within 4 hour cutoff
+        System->>System: No replacement invite
+    end
+```
+
+#### Flow P9: Player Opts Out
+
+```mermaid
+sequenceDiagram
+    actor Player
+    participant SMS as Twilio
+    participant System
+
+    Player->>SMS: "STOP"
+    SMS->>System: Webhook
+
+    System->>SMS: Send confirmation
+    SMS->>Player: "Got it - you won't receive any more messages."
+
+    System->>System: Update player opted_out: true
+```
+
+#### Flow P10: Calendar Decline Detection
+
+```mermaid
+sequenceDiagram
+    participant Cal as Google Calendar
+    participant System
+    actor Player
+
+    Note over Player: Player declines<br/>calendar invite
+
+    Cal->>System: Webhook or poll: event declined
+
+    System->>System: Update invitation → declined
+    System->>System: Update calendar_status → declined
+
+    alt More than 4 hours until game
+        System->>System: Invite next player in queue
+    end
+
+    Note over Player: No SMS sent<br/>(they already know)
+```
+
+---
+
+### System Automated Flows
+
+#### Flow S1: RSVP Deadline Timeout
+
+```mermaid
+sequenceDiagram
+    participant Cron as Hourly Cron
+    participant System
+    participant DB as Database
+
+    Cron->>System: Check for expired deadlines
+
+    System->>DB: Find invitations where<br/>status=invited AND deadline passed
+    DB-->>System: List of timed-out invitations
+
+    loop Each timed-out invitation
+        System->>DB: Update invitation → timeout
+        System->>DB: Update player timeout_count++
+
+        alt More than 4 hours until game
+            System->>System: Invite next player in queue
+        end
+    end
+
+    Note over System: No SMS sent to<br/>timed-out player (silent)
+```
+
+#### Flow S2: Invite Cascade
+
+```mermaid
+sequenceDiagram
+    participant System
+    participant DB as Database
+    participant SMS as Twilio
+
+    Note over System: Triggered when player<br/>declines or times out
+
+    System->>DB: Check game capacity vs confirmed count
+    DB-->>System: Spots remaining: 1
+
+    System->>DB: Find next pending invitation by position
+    DB-->>System: Player #11 (position 11)
+
+    System->>DB: Update invitation → invited
+    System->>DB: Update player last_invited_at
+
+    alt Within 24 hours of game (last-minute)
+        System->>SMS: Send last-minute invite
+    else Normal window
+        System->>SMS: Send standard invite
+    end
+```
+
+#### Flow S3: Game Completion
+
+```mermaid
+sequenceDiagram
+    participant Admin
+    participant System
+    participant DB as Database
+
+    Note over Admin: After game happens
+
+    Admin->>System: Mark game complete
+
+    System->>DB: Update game status → completed
+
+    loop Each invitation
+        System->>DB: Update player stats based on outcome
+        Note over DB: response_count++ if confirmed/declined<br/>timeout_count++ if timeout
+    end
+```
+
+---
+
+## Player SMS Journey (Summary)
 
 ```mermaid
 journey
