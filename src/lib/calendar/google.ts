@@ -4,16 +4,34 @@ import * as fs from 'fs';
 // Lazy-initialize client to avoid errors during build
 let calendarClient: calendar_v3.Calendar | null = null;
 
+/**
+ * Load service account credentials from either:
+ * - GOOGLE_SERVICE_ACCOUNT_JSON (base64 encoded, for Vercel)
+ * - GOOGLE_SERVICE_ACCOUNT_FILE (file path, for local dev)
+ */
+function loadCredentials(): Record<string, unknown> {
+  // Try base64-encoded JSON first (Vercel)
+  const base64Json = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  if (base64Json) {
+    const json = Buffer.from(base64Json, 'base64').toString('utf8');
+    return JSON.parse(json);
+  }
+
+  // Fall back to file path (local dev)
+  const serviceAccountFile = process.env.GOOGLE_SERVICE_ACCOUNT_FILE;
+  if (serviceAccountFile) {
+    return JSON.parse(fs.readFileSync(serviceAccountFile, 'utf8'));
+  }
+
+  throw new Error(
+    'Google Calendar credentials not configured. ' +
+    'Set GOOGLE_SERVICE_ACCOUNT_JSON (base64) or GOOGLE_SERVICE_ACCOUNT_FILE (path).'
+  );
+}
+
 function getClient(): calendar_v3.Calendar {
   if (!calendarClient) {
-    const serviceAccountFile = process.env.GOOGLE_SERVICE_ACCOUNT_FILE;
-
-    if (!serviceAccountFile) {
-      throw new Error('GOOGLE_SERVICE_ACCOUNT_FILE not configured');
-    }
-
-    // Read and parse service account credentials
-    const credentials = JSON.parse(fs.readFileSync(serviceAccountFile, 'utf8'));
+    const credentials = loadCredentials();
 
     const auth = new google.auth.GoogleAuth({
       credentials,
