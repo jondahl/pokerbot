@@ -137,23 +137,30 @@ export async function getNextPendingInvitation(
     })),
   });
 
-  const result = await prisma.invitation.findFirst({
-    where: {
-      gameId,
-      status: 'pending',
-      player: { optedOut: false },
-    },
-    orderBy: { position: 'asc' },
-    include: { player: true },
-  });
+  try {
+    console.log('getNextPendingInvitation: About to run findFirst query with player filter');
 
-  console.log('getNextPendingInvitation result:', result ? {
-    invitationId: result.id,
-    playerName: `${result.player.firstName} ${result.player.lastName}`,
-    optedOut: result.player.optedOut,
-  } : 'null - no eligible pending invitation found');
+    const result = await prisma.invitation.findFirst({
+      where: {
+        gameId,
+        status: 'pending',
+        player: { optedOut: false },
+      },
+      orderBy: { position: 'asc' },
+      include: { player: true },
+    });
 
-  return result;
+    console.log('getNextPendingInvitation result:', result ? {
+      invitationId: result.id,
+      playerName: `${result.player.firstName} ${result.player.lastName}`,
+      optedOut: result.player.optedOut,
+    } : 'null - no eligible pending invitation found');
+
+    return result;
+  } catch (error) {
+    console.error('getNextPendingInvitation QUERY ERROR:', error);
+    throw error;
+  }
 }
 
 /**
