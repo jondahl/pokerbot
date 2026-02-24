@@ -2,9 +2,12 @@ import { notFound } from 'next/navigation';
 import { getGame } from '@/lib/data/games';
 import { getInvitationsForGame } from '@/lib/data/invitations';
 import { getPlayers } from '@/lib/data/players';
+import { getMessagesForGame } from '@/lib/data/messages';
 import InvitationList from './InvitationList';
 import AddInvitationsForm from './AddInvitationsForm';
 import SendInvitationsButton from './SendInvitationsButton';
+import GameStatusButton from './GameStatusButton';
+import MessageLog from './MessageLog';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,6 +25,7 @@ export default async function GameDetailPage({ params }: PageProps) {
 
   const invitations = await getInvitationsForGame(id);
   const allPlayers = await getPlayers();
+  const messages = await getMessagesForGame(id);
 
   // Players not yet invited to this game
   const invitedPlayerIds = new Set(invitations.map((inv) => inv.playerId));
@@ -29,7 +33,10 @@ export default async function GameDetailPage({ params }: PageProps) {
 
   const confirmedCount = invitations.filter((inv) => inv.status === 'confirmed').length;
   const invitedCount = invitations.filter((inv) => inv.status === 'invited').length;
-  const pendingCount = invitations.filter((inv) => inv.status === 'pending').length;
+  const pendingInvitations = invitations.filter((inv) => inv.status === 'pending');
+  const pendingCount = pendingInvitations.length;
+  const pendingOptedOutCount = pendingInvitations.filter((inv) => inv.player.optedOut).length;
+  const pendingEligibleCount = pendingCount - pendingOptedOutCount;
 
   return (
     <div>
@@ -83,14 +90,52 @@ export default async function GameDetailPage({ params }: PageProps) {
         </div>
         <div className="bg-white p-4 rounded-lg shadow">
           <div className="text-sm text-gray-500">In Queue</div>
-          <div className="text-2xl font-semibold text-gray-600">{pendingCount}</div>
+          <div className="text-2xl font-semibold text-gray-600">
+            {pendingCount}
+            {pendingOptedOutCount > 0 && (
+              <span className="text-sm font-normal text-red-500 ml-2">
+                ({pendingOptedOutCount} opted out)
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Actions */}
-      {game.status === 'active' && pendingCount > 0 && (
-        <div className="mt-6">
+      {/* Game Status Actions */}
+      <div className="mt-6 flex items-center space-x-4">
+        <GameStatusButton gameId={id} currentStatus={game.status} />
+        {game.status === 'active' && pendingCount > 0 && (
           <SendInvitationsButton gameId={id} />
+        )}
+      </div>
+
+      {/* Draft Mode Instructions */}
+      {game.status === 'draft' && pendingCount > 0 && (
+        <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-md">
+          <p className="text-sm text-yellow-800">
+            <strong>Game is in draft mode.</strong> Click &ldquo;Activate Game&rdquo; to enable sending invitations,
+            then click &ldquo;Send Invitations&rdquo; to send SMS to players in the queue.
+          </p>
+        </div>
+      )}
+
+      {/* Warning: All pending players opted out */}
+      {game.status === 'active' && pendingCount > 0 && pendingEligibleCount === 0 && (
+        <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-md">
+          <p className="text-sm text-red-800">
+            <strong>Warning:</strong> All players in the queue have opted out of SMS notifications.
+            They will not receive invitations. Add new players or reactivate opted-out players from the Players page.
+          </p>
+        </div>
+      )}
+
+      {/* Warning: Some pending players opted out */}
+      {game.status === 'active' && pendingOptedOutCount > 0 && pendingEligibleCount > 0 && (
+        <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-md">
+          <p className="text-sm text-yellow-800">
+            <strong>Note:</strong> {pendingOptedOutCount} player{pendingOptedOutCount === 1 ? ' has' : 's have'} opted out and will be skipped.
+            {pendingEligibleCount} eligible player{pendingEligibleCount === 1 ? ' remains' : 's remain'} in the queue.
+          </p>
         </div>
       )}
 
@@ -109,6 +154,14 @@ export default async function GameDetailPage({ params }: PageProps) {
       <div className="mt-8">
         <h2 className="text-lg font-medium text-gray-900 mb-4">Invitations</h2>
         <InvitationList invitations={invitations} />
+      </div>
+
+      {/* Message Log */}
+      <div className="mt-8">
+        <h2 className="text-lg font-medium text-gray-900 mb-4">
+          Message Log ({messages.length})
+        </h2>
+        <MessageLog messages={messages} />
       </div>
     </div>
   );
