@@ -258,7 +258,10 @@ export async function sendInvitationsForGame(
   gameId: string,
   batchSize: number = 5
 ): Promise<number> {
+  console.log('sendInvitationsForGame ENTER:', gameId);
+
   const game = await getGame(gameId);
+  console.log('sendInvitationsForGame: getGame returned:', game ? game.status : 'null');
 
   if (!game) {
     throw new Error('Game not found');
