@@ -111,11 +111,15 @@ export async function markInvitationAsSent(id: string): Promise<Invitation> {
 /**
  * Get the next pending invitation for a game (by position order)
  * Skips players who have opted out
+ *
+ * NOTE: Uses findMany + JS filter instead of Prisma relational filter
+ * because the relational filter `player: { optedOut: false }` was
+ * returning null even when eligible invitations existed.
  */
 export async function getNextPendingInvitation(
   gameId: string
 ): Promise<InvitationWithPlayer | null> {
-  // Debug: Log all pending invitations for this game first
+  // Fetch all pending invitations with player data
   const allPending = await prisma.invitation.findMany({
     where: {
       gameId,
@@ -125,42 +129,19 @@ export async function getNextPendingInvitation(
     orderBy: { position: 'asc' },
   });
 
-  console.log('getNextPendingInvitation debug:', {
+  // Filter in JavaScript to find eligible (non-opted-out) players
+  const eligible = allPending.filter(inv => !inv.player.optedOut);
+
+  console.log('getNextPendingInvitation:', {
     gameId,
-    totalPendingInvitations: allPending.length,
-    pendingPlayers: allPending.map(inv => ({
-      invitationId: inv.id,
-      playerId: inv.playerId,
-      playerName: `${inv.player.firstName} ${inv.player.lastName}`,
-      position: inv.position,
-      optedOut: inv.player.optedOut,
-    })),
+    totalPending: allPending.length,
+    eligibleCount: eligible.length,
+    nextPlayer: eligible[0]
+      ? `${eligible[0].player.firstName} ${eligible[0].player.lastName}`
+      : 'none',
   });
 
-  try {
-    console.log('getNextPendingInvitation: About to run findFirst query with player filter');
-
-    const result = await prisma.invitation.findFirst({
-      where: {
-        gameId,
-        status: 'pending',
-        player: { optedOut: false },
-      },
-      orderBy: { position: 'asc' },
-      include: { player: true },
-    });
-
-    console.log('getNextPendingInvitation result:', result ? {
-      invitationId: result.id,
-      playerName: `${result.player.firstName} ${result.player.lastName}`,
-      optedOut: result.player.optedOut,
-    } : 'null - no eligible pending invitation found');
-
-    return result;
-  } catch (error) {
-    console.error('getNextPendingInvitation QUERY ERROR:', error);
-    throw error;
-  }
+  return eligible[0] || null;
 }
 
 /**
