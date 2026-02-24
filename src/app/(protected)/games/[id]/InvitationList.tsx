@@ -65,6 +65,11 @@ export default function InvitationList({ invitations }: InvitationListProps) {
               <td className="px-6 py-4 whitespace-nowrap">
                 <div className="text-sm font-medium text-gray-900">
                   {invitation.player.firstName} {invitation.player.lastName}
+                  {invitation.player.optedOut && (
+                    <span className="ml-2 px-2 py-0.5 text-xs font-medium bg-red-100 text-red-800 rounded">
+                      Opted Out
+                    </span>
+                  )}
                 </div>
               </td>
               <td className="px-6 py-4 whitespace-nowrap">
