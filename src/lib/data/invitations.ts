@@ -115,7 +115,29 @@ export async function markInvitationAsSent(id: string): Promise<Invitation> {
 export async function getNextPendingInvitation(
   gameId: string
 ): Promise<InvitationWithPlayer | null> {
-  return prisma.invitation.findFirst({
+  // Debug: Log all pending invitations for this game first
+  const allPending = await prisma.invitation.findMany({
+    where: {
+      gameId,
+      status: 'pending',
+    },
+    include: { player: true },
+    orderBy: { position: 'asc' },
+  });
+
+  console.log('getNextPendingInvitation debug:', {
+    gameId,
+    totalPendingInvitations: allPending.length,
+    pendingPlayers: allPending.map(inv => ({
+      invitationId: inv.id,
+      playerId: inv.playerId,
+      playerName: `${inv.player.firstName} ${inv.player.lastName}`,
+      position: inv.position,
+      optedOut: inv.player.optedOut,
+    })),
+  });
+
+  const result = await prisma.invitation.findFirst({
     where: {
       gameId,
       status: 'pending',
@@ -124,6 +146,14 @@ export async function getNextPendingInvitation(
     orderBy: { position: 'asc' },
     include: { player: true },
   });
+
+  console.log('getNextPendingInvitation result:', result ? {
+    invitationId: result.id,
+    playerName: `${result.player.firstName} ${result.player.lastName}`,
+    optedOut: result.player.optedOut,
+  } : 'null - no eligible pending invitation found');
+
+  return result;
 }
 
 /**
@@ -134,6 +164,18 @@ export async function getConfirmedCount(gameId: string): Promise<number> {
     where: {
       gameId,
       status: 'confirmed',
+    },
+  });
+}
+
+/**
+ * Get count of active invitations (confirmed + invited/waiting for response)
+ */
+export async function getActiveInvitationCount(gameId: string): Promise<number> {
+  return prisma.invitation.count({
+    where: {
+      gameId,
+      status: { in: ['confirmed', 'invited'] },
     },
   });
 }
