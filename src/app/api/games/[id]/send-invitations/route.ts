@@ -7,21 +7,12 @@ export async function POST(
 ) {
   const { id } = await params;
 
-  console.log('=== API send-invitations START ===');
-  console.log('Game ID:', id);
+  // TEST: Return hardcoded value to verify API route works
+  console.log('API TEST - gameId:', id, '- returning hardcoded 999');
 
-  try {
-    console.log('Calling sendInvitationsForGame...');
-    const sentCount = await sendInvitationsForGame(id);
-    console.log('sendInvitationsForGame returned:', sentCount);
-    console.log('=== API send-invitations COMPLETE ===');
-    return NextResponse.json({ success: true, sentCount });
-  } catch (error) {
-    console.error('=== API send-invitations ERROR ===');
-    console.error('Error:', error);
-    return NextResponse.json(
-      { success: false, error: String(error) },
-      { status: 500 }
-    );
-  }
+  // Temporarily bypass sendInvitationsForGame to test
+  // const sentCount = await sendInvitationsForGame(id);
+  const sentCount = 999;
+
+  return NextResponse.json({ success: true, sentCount });
 }
