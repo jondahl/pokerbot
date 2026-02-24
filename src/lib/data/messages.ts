@@ -142,3 +142,19 @@ export async function countPendingEscalations(): Promise<number> {
     },
   });
 }
+
+/**
+ * Get all messages for a game
+ */
+export async function getMessagesForGame(gameId: string): Promise<MessageWithContext[]> {
+  return prisma.message.findMany({
+    where: {
+      gameId,
+    },
+    orderBy: { sentAt: 'desc' },
+    include: {
+      player: true,
+      game: true,
+    },
+  });
+}

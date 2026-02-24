@@ -15,7 +15,9 @@ vi.mock('@/lib/data/invitations', () => ({
   updateInvitationStatus: vi.fn(),
   getNextPendingInvitation: vi.fn(),
   getConfirmedCount: vi.fn(),
+  getActiveInvitationCount: vi.fn(),
   updatePlayerResponseStats: vi.fn(),
+  updateInvitationCalendarEvent: vi.fn(),
 }));
 
 vi.mock('@/lib/data/games', () => ({
@@ -169,6 +171,144 @@ describe('Invitation Flow', () => {
       expect(result.success).toBe(false);
       expect(result.error).toBe('Player has opted out');
       expect(sendSMS).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('sendInvitationsForGame', () => {
+    it('should send invitations up to batch size', async () => {
+      const { sendSMS } = await import('@/lib/sms/twilio');
+      const { getInvitation, getNextPendingInvitation, getActiveInvitationCount, markInvitationAsSent } = await import('@/lib/data/invitations');
+      const { getGame } = await import('@/lib/data/games');
+      const { sendInvitationsForGame } = await import('../flow');
+
+      const mockGame: Partial<GameWithInvitations> = {
+        id: 'game-1',
+        date: new Date('2024-03-11'),
+        time: new Date('2024-03-11T19:00:00'),
+        location: '123 Main St',
+        capacity: 8,
+        status: 'active',
+      };
+
+      const mockInvitation: Partial<InvitationWithPlayer> = {
+        id: 'inv-1',
+        gameId: 'game-1',
+        playerId: 'player-1',
+        status: 'pending',
+        player: {
+          id: 'player-1',
+          firstName: 'John',
+          lastName: 'Doe',
+          phone: '+15551234567',
+          optedOut: false,
+        } as Player,
+      };
+
+      vi.mocked(getGame).mockResolvedValue(mockGame as GameWithInvitations);
+      vi.mocked(getActiveInvitationCount).mockResolvedValue(0);
+      vi.mocked(getNextPendingInvitation)
+        .mockResolvedValueOnce(mockInvitation as InvitationWithPlayer)
+        .mockResolvedValueOnce(null); // No more pending
+      vi.mocked(getInvitation).mockResolvedValue(mockInvitation as InvitationWithPlayer);
+      vi.mocked(sendSMS).mockResolvedValue({ success: true, messageSid: 'SM123' });
+      vi.mocked(markInvitationAsSent).mockResolvedValue(mockInvitation as Invitation);
+
+      const sentCount = await sendInvitationsForGame('game-1');
+
+      expect(sentCount).toBe(1);
+      expect(sendSMS).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not send invitations if game is not active', async () => {
+      const { sendSMS } = await import('@/lib/sms/twilio');
+      const { getGame } = await import('@/lib/data/games');
+      const { sendInvitationsForGame } = await import('../flow');
+
+      const mockGame: Partial<GameWithInvitations> = {
+        id: 'game-1',
+        date: new Date('2024-03-11'),
+        time: new Date('2024-03-11T19:00:00'),
+        location: '123 Main St',
+        capacity: 8,
+        status: 'draft', // Not active!
+      };
+
+      vi.mocked(getGame).mockResolvedValue(mockGame as GameWithInvitations);
+
+      const sentCount = await sendInvitationsForGame('game-1');
+
+      expect(sentCount).toBe(0);
+      expect(sendSMS).not.toHaveBeenCalled();
+    });
+
+    it('should not send invitations if game is at capacity', async () => {
+      const { sendSMS } = await import('@/lib/sms/twilio');
+      const { getActiveInvitationCount } = await import('@/lib/data/invitations');
+      const { getGame } = await import('@/lib/data/games');
+      const { sendInvitationsForGame } = await import('../flow');
+
+      const mockGame: Partial<GameWithInvitations> = {
+        id: 'game-1',
+        date: new Date('2024-03-11'),
+        time: new Date('2024-03-11T19:00:00'),
+        location: '123 Main St',
+        capacity: 8,
+        status: 'active',
+      };
+
+      vi.mocked(getGame).mockResolvedValue(mockGame as GameWithInvitations);
+      vi.mocked(getActiveInvitationCount).mockResolvedValue(8); // Full capacity
+
+      const sentCount = await sendInvitationsForGame('game-1');
+
+      expect(sentCount).toBe(0);
+      expect(sendSMS).not.toHaveBeenCalled();
+    });
+
+    it('should account for already invited players when calculating spots to fill', async () => {
+      const { sendSMS } = await import('@/lib/sms/twilio');
+      const { getInvitation, getNextPendingInvitation, getActiveInvitationCount, markInvitationAsSent } = await import('@/lib/data/invitations');
+      const { getGame } = await import('@/lib/data/games');
+      const { sendInvitationsForGame } = await import('../flow');
+
+      const mockGame: Partial<GameWithInvitations> = {
+        id: 'game-1',
+        date: new Date('2024-03-11'),
+        time: new Date('2024-03-11T19:00:00'),
+        location: '123 Main St',
+        capacity: 8,
+        status: 'active',
+      };
+
+      const mockInvitation: Partial<InvitationWithPlayer> = {
+        id: 'inv-1',
+        gameId: 'game-1',
+        playerId: 'player-1',
+        status: 'pending',
+        player: {
+          id: 'player-1',
+          firstName: 'John',
+          lastName: 'Doe',
+          phone: '+15551234567',
+          optedOut: false,
+        } as Player,
+      };
+
+      vi.mocked(getGame).mockResolvedValue(mockGame as GameWithInvitations);
+      // 5 confirmed + 2 invited = 7 active, only 1 spot left
+      vi.mocked(getActiveInvitationCount).mockResolvedValue(7);
+      vi.mocked(getNextPendingInvitation)
+        .mockResolvedValueOnce(mockInvitation as InvitationWithPlayer)
+        .mockResolvedValueOnce(null);
+      vi.mocked(getInvitation).mockResolvedValue(mockInvitation as InvitationWithPlayer);
+      vi.mocked(sendSMS).mockResolvedValue({ success: true, messageSid: 'SM123' });
+      vi.mocked(markInvitationAsSent).mockResolvedValue(mockInvitation as Invitation);
+
+      const sentCount = await sendInvitationsForGame('game-1', 5); // Request batch of 5
+
+      // Should only send 1 (capacity 8 - 7 active = 1 spot)
+      expect(sentCount).toBe(1);
+      expect(sendSMS).toHaveBeenCalledTimes(1);
     });
   });
 });

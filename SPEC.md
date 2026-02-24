@@ -73,19 +73,40 @@ Calculated fresh for each game:
 
 ## Invitation Flow
 
+### Game Status Lifecycle
+
+Games progress through these statuses:
+- **Draft** - Game created, players can be added to queue, no SMS sent yet
+- **Active** - Game is live, invitations can be sent, accepting RSVPs
+- **Completed** - Game happened, archived
+- **Cancelled** - Game was cancelled
+
 ### Step-by-Step Process
 
-1. **Admin creates game** - Sets date/time/location/capacity
-2. **Admin sees priority list** - System-generated order based on algorithm
-3. **Admin reorders (optional)** - Drag-and-drop to adjust
-4. **Admin confirms list** - Locks in the order
-5. **System sends initial invites** - Sends to top N players (N = capacity)
-6. **Players respond:**
+1. **Admin creates game** - Sets date/time/location/capacity (status: **draft**)
+2. **Admin adds players to queue** - Players added with status "pending" (displayed as "In Queue")
+3. **Admin sees priority list** - System-generated order based on algorithm
+4. **Admin reorders (optional)** - Drag-and-drop to adjust priority
+5. **Admin activates game** - Clicks "Activate Game" button (status: **active**)
+6. **Admin sends invitations** - Clicks "Send Invitations" to trigger SMS
+   - System sends SMS to players up to capacity (batch size: 5)
+   - Player status changes from "pending" to "invited"
+7. **Players respond:**
    - YES → Confirmed, receives calendar invite
    - NO → Acknowledged, next person in line gets invited
    - No response by deadline → Auto-decline, invite next person
-7. **Game fills** - Stop sending invites
-8. **Hard cutoff** - No auto-invites within 4 hours of game start
+8. **Game fills** - Stop sending invites (counts confirmed + invited players)
+9. **Hard cutoff** - No auto-invites within 4 hours of game start
+
+### Important: Two-Step Invitation Process
+
+**Adding players to queue does NOT send SMS.** The flow requires explicit actions:
+
+1. Add players → Status: "In Queue" (no SMS)
+2. Activate game → Enables "Send Invitations" button
+3. Click "Send Invitations" → SMS sent, status: "Invited"
+
+This prevents accidental SMS sends while setting up a game.
 
 ### Morning-of Reminder
 
@@ -254,11 +275,16 @@ Admin composes these directly (not LLM-generated):
 - See which messages were auto-handled vs admin-handled
 - Override/correct if LLM made a mistake (rare)
 
-**Active Game View:**
-- Real-time status of current game
-- See all invitations: who's confirmed, declined, pending, not yet invited
-- See who's next in line if someone drops
-- Quick actions: manually invite someone, mark someone as declined
+**Game Detail View:**
+- Game info header with status badge (Draft/Active/Completed/Cancelled)
+- Stats cards: Capacity, Confirmed count, Invited (waiting) count, In Queue count
+- **Status actions:**
+  - Draft games: "Activate Game" button
+  - Active games: "Send Invitations", "Mark Complete", "Cancel Game" buttons
+- **Draft mode instruction banner** - Explains the activation flow
+- Add players form (for players not yet in this game)
+- Invitations list with status for each player
+- **Message Log** - All SMS sent/received for this game with timestamps
 
 **Game History:**
 - Past games list

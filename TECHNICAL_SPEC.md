@@ -938,4 +938,133 @@ POST /api/cron/calendar-sync      # Every 15min - check calendar declines
 
 ---
 
-*Last updated: Feb 15, 2025*
+## Deployment Configuration
+
+### Vercel Setup
+
+**Project Settings:**
+- Framework: Next.js (auto-detected)
+- Node.js version: 24.x
+- Build command: `next build`
+- Output directory: `.next`
+
+**Branch Strategy:**
+- `main` → Production environment
+- `dev` → Preview environment
+
+### Environment Variables
+
+Required environment variables for each environment:
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `DATABASE_URL` | Supabase Session Pooler URL | `postgresql://postgres.[ref]:[pw]@aws-X-REGION.pooler.supabase.com:5432/postgres` |
+| `TWILIO_ACCOUNT_SID` | Twilio account identifier | `ACxxxxxxxx` |
+| `TWILIO_AUTH_TOKEN` | Twilio auth token | `xxxxxxxx` |
+| `TWILIO_PHONE_NUMBER` | Twilio phone number (E.164) | `+14155551234` |
+| `ANTHROPIC_API_KEY` | Claude API key | `sk-ant-xxxxx` |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Base64-encoded service account JSON | `ewogICJ0eXB...` |
+| `GOOGLE_CALENDAR_ID` | Calendar ID for events | `primary` |
+| `ADMIN_PASSWORD` | Dashboard login password | `your-secure-password` |
+| `CRON_SECRET` | Secret for cron job auth | `random-string` |
+
+**Local Development (`.env.local`):**
+```bash
+# Database - use Session Pooler (port 5432)
+DATABASE_URL="postgresql://postgres.[ref]:[pw]@aws-X-REGION.pooler.supabase.com:5432/postgres"
+
+# For local dev, can use file path instead of base64
+GOOGLE_SERVICE_ACCOUNT_FILE="/path/to/service-account.json"
+```
+
+### Database Configuration
+
+**Why Session Pooler (port 5432)?**
+- Supabase offers Transaction Pooler (6543) and Session Pooler (5432)
+- Transaction Pooler uses PgBouncer in transaction mode
+- PgBouncer doesn't support prepared statements
+- Prisma requires prepared statements
+- Session Pooler supports prepared statements
+
+**Connection String Format:**
+```
+postgresql://postgres.[project-ref]:[password]@aws-X-REGION.pooler.supabase.com:5432/postgres
+```
+
+### Cron Jobs
+
+**Vercel Hobby Plan Limitation:**
+- Only daily cron jobs allowed (not hourly)
+- Upgrade to Pro for more frequent execution
+
+**Configuration (`vercel.json`):**
+```json
+{
+  "framework": "nextjs",
+  "crons": [
+    {
+      "path": "/api/cron/deadline-check",
+      "schedule": "0 9 * * *"
+    }
+  ]
+}
+```
+
+| Cron Job | Schedule | Purpose |
+|----------|----------|---------|
+| `deadline-check` | 9:00 AM daily | Process expired deadlines, send morning checks |
+
+### Google Calendar Setup
+
+**Service Account Configuration:**
+1. Create service account in Google Cloud Console
+2. Enable Google Calendar API
+3. Download JSON key file
+4. Base64 encode: `base64 -i service-account.json | tr -d '\n'`
+5. Set as `GOOGLE_SERVICE_ACCOUNT_JSON` env var
+
+**Calendar Sharing:**
+- Share the target calendar with the service account email
+- Grant "Make changes to events" permission
+
+---
+
+## Game Status Lifecycle
+
+```
+draft → active → completed
+                ↘ cancelled
+```
+
+| Status | Description | Available Actions |
+|--------|-------------|-------------------|
+| `draft` | Game created, setting up | Activate, add players to queue |
+| `active` | Accepting RSVPs, sending invites | Send invitations, complete, cancel |
+| `completed` | Game happened | View history |
+| `cancelled` | Game cancelled | View history |
+
+---
+
+## Invitation Status Lifecycle
+
+```
+pending → invited → confirmed
+                  ↘ declined
+                  ↘ timeout
+```
+
+| Status | UI Display | Description |
+|--------|------------|-------------|
+| `pending` | In Queue | Added to game, SMS not yet sent |
+| `invited` | Invited | SMS sent, awaiting response |
+| `confirmed` | Confirmed | Player said YES, calendar sent |
+| `declined` | Declined | Player said NO |
+| `timeout` | Timeout | No response by deadline |
+
+**Key Insight:** Players in "In Queue" status have NOT received an SMS. The admin must:
+1. Activate the game (draft → active)
+2. Click "Send Invitations" to trigger SMS
+
+---
+
+*Last updated: Feb 24, 2025*

@@ -6,6 +6,7 @@ import {
   getNextPendingInvitation,
   updatePlayerResponseStats,
   getConfirmedCount,
+  getActiveInvitationCount,
   updateInvitationCalendarEvent,
 } from '@/lib/data/invitations';
 import { getGame } from '@/lib/data/games';
@@ -72,20 +73,25 @@ function isWithinCutoffWindow(game: { date: Date; time: Date }): boolean {
 export async function sendInvitation(
   invitationId: string
 ): Promise<SendInvitationResult> {
+  console.log('sendInvitation called:', invitationId);
+
   const invitation = await getInvitation(invitationId);
 
   if (!invitation) {
+    console.error('sendInvitation: Invitation not found:', invitationId);
     return { success: false, error: 'Invitation not found' };
   }
 
   // Don't send to opted-out players
   if (invitation.player.optedOut) {
+    console.log('sendInvitation: Player has opted out:', invitation.player.id);
     return { success: false, error: 'Player has opted out' };
   }
 
   const game = await getGame(invitation.gameId);
 
   if (!game) {
+    console.error('sendInvitation: Game not found:', invitation.gameId);
     return { success: false, error: 'Game not found' };
   }
 
@@ -95,12 +101,16 @@ export async function sendInvitation(
     game.location
   );
 
+  console.log('sendInvitation: Sending SMS to', invitation.player.phone);
+
   const smsResult = await sendSMS(invitation.player.phone, message);
 
   if (!smsResult.success) {
+    console.error('sendInvitation: SMS failed:', smsResult.error);
     return { success: false, error: smsResult.error };
   }
 
+  console.log('sendInvitation: SMS sent successfully, marking invitation as sent');
   await markInvitationAsSent(invitationId);
 
   return { success: true, messageSid: smsResult.messageSid };
@@ -254,9 +264,30 @@ export async function sendInvitationsForGame(
     throw new Error('Game not found');
   }
 
+  // Check game status
+  if (game.status !== 'active') {
+    console.log('Game is not active, cannot send invitations:', gameId, 'status:', game.status);
+    return 0;
+  }
+
   let sentCount = 0;
-  const confirmedCount = await getConfirmedCount(gameId);
-  const spotsToFill = game.capacity - confirmedCount;
+
+  // Count both confirmed AND invited (waiting for response) players
+  const activeCount = await getActiveInvitationCount(gameId);
+  const spotsToFill = game.capacity - activeCount;
+
+  console.log('sendInvitationsForGame:', {
+    gameId,
+    capacity: game.capacity,
+    activeCount,
+    spotsToFill,
+    batchSize,
+  });
+
+  if (spotsToFill <= 0) {
+    console.log('No spots to fill, game is at capacity with confirmed/invited players');
+    return 0;
+  }
 
   // Send invitations up to batchSize or spotsToFill, whichever is smaller
   const toSend = Math.min(batchSize, spotsToFill);
@@ -265,15 +296,27 @@ export async function sendInvitationsForGame(
     const invitation = await getNextPendingInvitation(gameId);
 
     if (!invitation) {
+      console.log('No more pending invitations found for game:', gameId);
       break;
     }
+
+    console.log('Attempting to send invitation:', {
+      invitationId: invitation.id,
+      playerName: `${invitation.player.firstName} ${invitation.player.lastName}`,
+      phone: invitation.player.phone,
+      optedOut: invitation.player.optedOut,
+    });
 
     const result = await sendInvitation(invitation.id);
 
     if (result.success) {
+      console.log('Successfully sent invitation:', invitation.id);
       sentCount++;
+    } else {
+      console.error('Failed to send invitation:', invitation.id, 'error:', result.error);
     }
   }
 
+  console.log('sendInvitationsForGame complete:', { sentCount });
   return sentCount;
 }
