@@ -111,37 +111,39 @@ export async function markInvitationAsSent(id: string): Promise<Invitation> {
 /**
  * Get the next pending invitation for a game (by position order)
  * Skips players who have opted out
- *
- * NOTE: Uses findMany + JS filter instead of Prisma relational filter
- * because the relational filter `player: { optedOut: false }` was
- * returning null even when eligible invitations existed.
  */
 export async function getNextPendingInvitation(
   gameId: string
 ): Promise<InvitationWithPlayer | null> {
-  // Fetch all pending invitations with player data
-  const allPending = await prisma.invitation.findMany({
-    where: {
-      gameId,
-      status: 'pending',
-    },
-    include: { player: true },
-    orderBy: { position: 'asc' },
-  });
+  console.log('getNextPendingInvitation START:', gameId);
 
-  // Filter in JavaScript to find eligible (non-opted-out) players
-  const eligible = allPending.filter(inv => !inv.player.optedOut);
+  try {
+    const allPending = await prisma.invitation.findMany({
+      where: {
+        gameId,
+        status: 'pending',
+      },
+      include: { player: true },
+      orderBy: { position: 'asc' },
+    });
 
-  console.log('getNextPendingInvitation:', {
-    gameId,
-    totalPending: allPending.length,
-    eligibleCount: eligible.length,
-    nextPlayer: eligible[0]
-      ? `${eligible[0].player.firstName} ${eligible[0].player.lastName}`
-      : 'none',
-  });
+    console.log('getNextPendingInvitation QUERY DONE:', allPending.length, 'pending');
 
-  return eligible[0] || null;
+    const eligible = allPending.filter(inv => !inv.player.optedOut);
+
+    console.log('getNextPendingInvitation RESULT:', {
+      totalPending: allPending.length,
+      eligibleCount: eligible.length,
+      nextPlayer: eligible[0]
+        ? `${eligible[0].player.firstName} ${eligible[0].player.lastName}`
+        : 'none',
+    });
+
+    return eligible[0] || null;
+  } catch (error) {
+    console.error('getNextPendingInvitation ERROR:', error);
+    throw error;
+  }
 }
 
 /**

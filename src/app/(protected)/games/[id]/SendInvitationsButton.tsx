@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { sendInvitationsAction } from './actions';
+import { useRouter } from 'next/navigation';
 
 interface SendInvitationsButtonProps {
   gameId: string;
@@ -9,19 +9,29 @@ interface SendInvitationsButtonProps {
 
 export default function SendInvitationsButton({ gameId }: SendInvitationsButtonProps) {
   const [isLoading, setIsLoading] = useState(false);
-  const [result, setResult] = useState<{ count: number } | null>(null);
+  const [result, setResult] = useState<{ count: number; error?: string } | null>(null);
+  const router = useRouter();
 
   async function handleSend() {
     setIsLoading(true);
     setResult(null);
 
     try {
-      const response = await sendInvitationsAction(gameId);
-      if (response.success) {
-        setResult({ count: response.sentCount || 0 });
+      const response = await fetch(`/api/games/${gameId}/send-invitations`, {
+        method: 'POST',
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setResult({ count: data.sentCount || 0 });
+        router.refresh();
+      } else {
+        setResult({ count: 0, error: data.error || 'Unknown error' });
       }
     } catch (error) {
       console.error('Failed to send invitations:', error);
+      setResult({ count: 0, error: String(error) });
     } finally {
       setIsLoading(false);
     }
@@ -37,10 +47,12 @@ export default function SendInvitationsButton({ gameId }: SendInvitationsButtonP
         {isLoading ? 'Sending...' : 'Send Invitations'}
       </button>
       {result && (
-        <span className="text-sm text-gray-600">
-          {result.count > 0
-            ? `Sent ${result.count} invitation${result.count === 1 ? '' : 's'}`
-            : 'No invitations to send'}
+        <span className={`text-sm ${result.error ? 'text-red-600' : 'text-gray-600'}`}>
+          {result.error
+            ? `Error: ${result.error}`
+            : result.count > 0
+              ? `Sent ${result.count} invitation${result.count === 1 ? '' : 's'}`
+              : 'No invitations to send'}
         </span>
       )}
     </div>

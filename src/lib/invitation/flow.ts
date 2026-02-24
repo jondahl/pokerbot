@@ -291,29 +291,39 @@ export async function sendInvitationsForGame(
 
   // Send invitations up to batchSize or spotsToFill, whichever is smaller
   const toSend = Math.min(batchSize, spotsToFill);
+  console.log('sendInvitationsForGame: entering loop, toSend:', toSend);
 
   for (let i = 0; i < toSend; i++) {
-    const invitation = await getNextPendingInvitation(gameId);
+    console.log('sendInvitationsForGame: loop iteration', i + 1, 'of', toSend);
 
-    if (!invitation) {
-      console.log('No more pending invitations found for game:', gameId);
-      break;
-    }
+    try {
+      console.log('sendInvitationsForGame: calling getNextPendingInvitation');
+      const invitation = await getNextPendingInvitation(gameId);
+      console.log('sendInvitationsForGame: getNextPendingInvitation returned:', invitation ? invitation.id : 'null');
 
-    console.log('Attempting to send invitation:', {
-      invitationId: invitation.id,
-      playerName: `${invitation.player.firstName} ${invitation.player.lastName}`,
-      phone: invitation.player.phone,
-      optedOut: invitation.player.optedOut,
-    });
+      if (!invitation) {
+        console.log('No more pending invitations found for game:', gameId);
+        break;
+      }
 
-    const result = await sendInvitation(invitation.id);
+      console.log('Attempting to send invitation:', {
+        invitationId: invitation.id,
+        playerName: `${invitation.player.firstName} ${invitation.player.lastName}`,
+        phone: invitation.player.phone,
+        optedOut: invitation.player.optedOut,
+      });
 
-    if (result.success) {
-      console.log('Successfully sent invitation:', invitation.id);
-      sentCount++;
-    } else {
-      console.error('Failed to send invitation:', invitation.id, 'error:', result.error);
+      const result = await sendInvitation(invitation.id);
+
+      if (result.success) {
+        console.log('Successfully sent invitation:', invitation.id);
+        sentCount++;
+      } else {
+        console.error('Failed to send invitation:', invitation.id, 'error:', result.error);
+      }
+    } catch (loopError) {
+      console.error('sendInvitationsForGame: ERROR in loop iteration', i, ':', loopError);
+      throw loopError;
     }
   }
 
